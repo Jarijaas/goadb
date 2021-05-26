@@ -5,8 +5,8 @@ import (
 	"net"
 	"runtime"
 
-	"github.com/zach-klippenstein/goadb/internal/errors"
-	"github.com/zach-klippenstein/goadb/wire"
+	"github.com/jarijaas/goadb/errors"
+	"github.com/jarijaas/goadb/wire"
 )
 
 // Dialer knows how to create connections to an adb server.

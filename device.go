@@ -2,13 +2,12 @@ package adb
 
 import (
 	"fmt"
+	"github.com/jarijaas/goadb/errors"
+	"github.com/jarijaas/goadb/wire"
 	"io"
 	"os"
 	"strings"
 	"time"
-
-	"github.com/zach-klippenstein/goadb/internal/errors"
-	"github.com/zach-klippenstein/goadb/wire"
 )
 
 // MtimeOfClose should be passed to OpenWrite to set the file modification time to the time the Close
@@ -78,6 +77,7 @@ func (c *Device) DeviceInfo() (*DeviceInfo, error) {
 		}
 	}
 
+
 	err = errors.Errorf(errors.DeviceNotFound, "device list doesn't contain serial %s", serial)
 	return nil, wrapClientError(err, c, "DeviceInfo")
 }
@@ -125,6 +125,48 @@ func (c *Device) RunCommand(cmd string, args ...string) (string, error) {
 	resp, err := conn.ReadUntilEof()
 	return string(resp), wrapClientError(err, c, "RunCommand")
 }
+
+/*
+Forward asks the adb server to forward connection from <local> to the <remote> address
+https://android.googlesource.com/platform/system/core/+/android-4.4_r1/adb/SERVICES.TXT
+
+From the Android docs:
+<host-prefix>:forward:<local>;<remote>
+    Asks the ADB server to forward local connections from <local>
+    to the <remote> address on a given device.
+    There, <host-prefix> can be one of the
+    host-serial/host-usb/host-local/host prefixes as described previously
+    and indicates which device/emulator to target.
+    the format of <local> is one of:
+        tcp:<port>      -> TCP connection on localhost:<port>
+        local:<path>    -> Unix local domain socket on <path>
+    the format of <remote> is one of:
+        tcp:<port>      -> TCP localhost:<port> on device
+        local:<path>    -> Unix local domain socket on device
+        jdwp:<pid>      -> JDWP thread on VM process <pid>
+    or even any one of the local services described below.
+ */
+func (c *Device) Forward(local string, remote string) error  {
+	conn, err := c.getSyncConn()
+	if err != nil {
+		return wrapClientError(err, c, "Forward")
+	}
+	defer conn.Close()
+
+	resp, err := roundTripSingleResponse(c.server,
+		fmt.Sprintf("%s:forward:%s;%s", c.descriptor.getHostPrefix(), local, remote))
+	fmt.Print(resp)
+	return err
+}
+
+/*
+ForwardTCP asks the adb server to forward tcp connection from <local> to the <remote> port address
+TCP wrapper around Forward
+ */
+func (c *Device) ForwardTCP(local int, remote int) error  {
+	return c.Forward(fmt.Sprintf("tcp:%d", local), fmt.Sprintf("tcp:%d", remote))
+}
+
 
 /*
 Remount, from the official adb command’s docs:
