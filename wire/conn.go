@@ -49,7 +49,7 @@ func (c *Conn) NewSyncConn() *SyncConn {
 }
 
 // RoundTripSingleResponse sends a message to the server, and reads a single
-// message response. If the reponse has a failure status code, returns it as an error.
+// message response. If the response has a failure status code, returns it as an error.
 func (conn *Conn) RoundTripSingleResponse(req []byte) (resp []byte, err error) {
 	if err = conn.SendMessage(req); err != nil {
 		return nil, err

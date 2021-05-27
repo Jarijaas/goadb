@@ -77,7 +77,6 @@ func (c *Device) DeviceInfo() (*DeviceInfo, error) {
 		}
 	}
 
-
 	err = errors.Errorf(errors.DeviceNotFound, "device list doesn't contain serial %s", serial)
 	return nil, wrapClientError(err, c, "DeviceInfo")
 }
@@ -126,6 +125,70 @@ func (c *Device) RunCommand(cmd string, args ...string) (string, error) {
 	return string(resp), wrapClientError(err, c, "RunCommand")
 }
 
+func (c *Device) RunCommandAsync(cmd string, args ...string) (chOut chan string, chClose chan struct{}, chErr chan error) {
+	chOut = make(chan string, 1)
+	chClose = make(chan struct{}, 1)
+	chErr = make(chan error, 1)
+
+	go func() {
+
+
+		defer close(chOut)
+		defer close(chClose)
+		defer close(chErr)
+
+		cmd, err := prepareCommandLine(cmd, args...)
+		if err != nil {
+			chErr <- wrapClientError(err, c, "RunCommand")
+			return
+		}
+
+		conn, err := c.dialDevice()
+		if err != nil {
+			chErr <- wrapClientError(err, c, "RunCommand")
+			return
+		}
+		defer conn.Close()
+
+		req := fmt.Sprintf("shell:%s", cmd)
+
+		// Shell responses are special, they don't include a length header.
+		// We read until the stream is closed.
+		// So, we can't use conn.RoundTripSingleResponse.
+		if err = conn.SendMessage([]byte(req)); err != nil {
+			chErr <- wrapClientError(err, c, "RunCommandAsync")
+			return
+		}
+		if _, err = conn.ReadStatus(req); err != nil {
+			chErr <- wrapClientError(err, c, "RunCommandAsync")
+			return
+		}
+
+		buf := make([]byte, 100)
+
+		for {
+			select {
+			case <- chClose: {
+				return // received close signal
+			}
+			default:
+				n, err := conn.Read(buf)
+				if err != nil {
+					fmt.Print(err)
+					chErr <- err
+					return
+				}
+
+				if n > 0 {
+					data := buf[:n]
+					chOut <- string(data)
+				}
+			}
+		}
+	}()
+	return
+}
+
 /*
 Forward asks the adb server to forward connection from <local> to the <remote> address
 https://android.googlesource.com/platform/system/core/+/android-4.4_r1/adb/SERVICES.TXT
@@ -145,28 +208,35 @@ From the Android docs:
         local:<path>    -> Unix local domain socket on device
         jdwp:<pid>      -> JDWP thread on VM process <pid>
     or even any one of the local services described below.
- */
-func (c *Device) Forward(local string, remote string) error  {
-	conn, err := c.getSyncConn()
+*/
+func (c *Device) Forward(local string, remote string) error {
+	conn, err := c.dialDevice()
 	if err != nil {
 		return wrapClientError(err, c, "Forward")
 	}
 	defer conn.Close()
 
-	resp, err := roundTripSingleResponse(c.server,
-		fmt.Sprintf("%s:forward:%s;%s", c.descriptor.getHostPrefix(), local, remote))
-	fmt.Print(resp)
+	req := fmt.Sprintf("%s:forward:%s;%s", c.descriptor.getHostPrefix(), local, remote)
+
+	if err = conn.SendMessage([]byte(req)); err != nil {
+		return err
+	}
+
+	if err = wire.SendMessageString(conn, req); err != nil {
+		return errors.WrapErrf(err, "error connecting to device '%s'", c.descriptor)
+	}
+
+	_, err = conn.ReadStatus(req)
 	return err
 }
 
 /*
 ForwardTCP asks the adb server to forward tcp connection from <local> to the <remote> port address
 TCP wrapper around Forward
- */
-func (c *Device) ForwardTCP(local int, remote int) error  {
+*/
+func (c *Device) ForwardTCP(local int, remote int) error {
 	return c.Forward(fmt.Sprintf("tcp:%d", local), fmt.Sprintf("tcp:%d", remote))
 }
-
 
 /*
 Remount, from the official adb command’s docs:

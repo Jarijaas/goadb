@@ -41,6 +41,7 @@ type Scanner interface {
 	StatusReader
 	ReadMessage() ([]byte, error)
 	ReadUntilEof() ([]byte, error)
+	Read([]byte) (int, error)
 
 	NewSyncScanner() SyncScanner
 }
@@ -75,6 +76,10 @@ func (s *realScanner) ReadUntilEof() ([]byte, error) {
 		return nil, errors.WrapErrorf(err, errors.NetworkError, "error reading until EOF")
 	}
 	return data, nil
+}
+
+func (s *realScanner) Read(buf []byte) (n int, err error) {
+	return s.reader.Read(buf)
 }
 
 func (s *realScanner) NewSyncScanner() SyncScanner {
